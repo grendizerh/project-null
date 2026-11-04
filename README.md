@@ -26,11 +26,10 @@ The easiest setup is the included script. It installs dependencies under your us
 ### 1. Clone the repository
 
 ```bash
-git clone <YOUR-GITHUB-REPOSITORY-URL> project-null
+git clone https://github.com/grendizerh/project-null
 cd project-null
 ```
 
-Replace `<YOUR-GITHUB-REPOSITORY-URL>` with the HTTPS or SSH URL of your GitHub repository.
 
 ### 2. Run setup once
 
