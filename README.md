@@ -1,218 +1,161 @@
-# Project NULL
+# Project NULL v0.4.9
 
-**A Tor-backed, loopback-only HTTPS proxy prototype with ephemeral session isolation.**
+**A loopback-only Chrome-compatible SOCKS5 adapter backed by Tor.**
 
-Project NULL starts a local Tor client, waits for a real three-relay circuit, and exposes a local HTTP `CONNECT` proxy. Applications explicitly configured to use that proxy send HTTPS connections through Tor. Websites see the Tor exit relay's IP address instead of the client's public IP address.
+Project NULL starts a dedicated Tor client and exposes a SOCKS5 listener on `127.0.0.1:<port>`. Chrome uses native SOCKS5: no browser username/password, no HTTP 407 challenge, and no web extension. The adapter validates each destination and forwards it through Tor's private Unix-domain SOCKS interface. The default stream-isolation mode is **session-wide** to avoid building a separate Tor isolation group for every page hostname and asset domain.
 
-> **Experimental software. Not a system-wide VPN.** Project NULL does not install a macOS Network Extension, route all device traffic, or provide a system-wide kill switch. Only applications configured to use its local proxy are in scope.
+This is an experimental browser proxy, **not** a system-wide VPN, packet filter, anonymity certification, or protection against an attacker controlling the Mac. It does not provide an OS-level kill switch, system DNS control, UDP forwarding, or Tor Browser anti-fingerprinting.
 
-## Features
+## What changed in v0.4.9
 
-- Starts and manages a separate Tor process with its own data directory.
-- Uses Tor Control Protocol cookie authentication on loopback.
-- Waits for Tor to bootstrap and confirms a built circuit with at least three relays.
-- Provides a loopback-only HTTP `CONNECT` proxy for HTTPS traffic.
-- Forwards destination hostnames to Tor through SOCKS5; it does not resolve proxied destination hostnames locally in the proxy code.
-- Uses Tor SOCKS username/password authentication with `IsolateSOCKSAuth` for stream isolation.
-- Generates an ephemeral Ed25519 keypair per application session. The key is used to derive an opaque session label and SOCKS isolation token; it is **not** a Tor network identity.
-- Can launch a dedicated Chrome profile preconfigured to use Project NULL.
-- Includes offline self-tests and a live Tor integration test.
-- Has no direct-connect fallback in its own proxy implementation.
+- Fixed dashboard buttons appearing as white controls with unreadable text on macOS. The interface now uses explicit-color Tk label-based action controls instead of Aqua-rendered native buttons; hover, disabled, mouse and keyboard activation are supported.
+- Settings dialog actions use the same high-contrast controls.
+- No Tor, proxy, DNS, or routing behaviour changed from v0.4.8.
 
-## Quick start — macOS Apple Silicon
+## What changed in v0.4.8
 
-The easiest setup is the included script. It installs dependencies under your user account; it does not require `sudo`, Homebrew, or Xcode Command Line Tools.
+- Removed Chrome's `--host-resolver-rules` launch argument because your Chrome build displayed an unsupported-command-line warning for it. Kept DNS prefetch disabled. Chromium documents that SOCKS5 URL requests resolve destination hostnames through the proxy; this is not a claim that every browser/OS background component is prevented from making DNS requests.
+- Changed the default Tor SOCKS isolation scope from per-hostname to per-Project-NULL-session. All destinations in one temporary browser session use the same ephemeral Tor SOCKS auth credential, allowing Tor to reuse compatible circuits instead of forcing new isolation groups for every asset hostname.
+- Retained optional **hostname** isolation in Settings for users who prefer stronger separation and accept additional circuit churn and slower page loads.
+- Replaced the accept-loop wait with a bounded fixed worker pool and bounded pending queue. The accept loop no longer blocks while waiting for a stream worker.
+- Raises only this process's soft file-descriptor limit to 512 when the inherited hard limit allows it; the hard limit and system settings are not changed. The active worker pool is capped at 128, with a 128-connection pending queue and a 256-entry kernel listen backlog.
+- Added tests for session/hostname isolation selection, legacy config defaults, Chrome flags, and simultaneous queued client bursts.
 
-### 1. Clone the repository
+## Important local security trade-off
+
+The browser-facing SOCKS5 listener has **no authentication** because Chrome's native SOCKS5 support does not implement SOCKS5 authentication. The listener binds only to `127.0.0.1`, so it is not exposed to the LAN, but any process on this Mac that can connect to that loopback port can use Project NULL while it is running. This is not a boundary against malware or another local account. The upstream Tor SOCKS interface remains private and uses SOCKS authentication for stream isolation.
+
+## Stream-isolation modes
+
+The Settings menu offers two choices:
+
+- **`session` (default / faster):** all destination hostnames used by the current temporary Chrome session share one Tor SOCKS isolation credential. Tor may reuse a circuit for streams to different websites. This reduces circuit churn and usually makes complex pages with many asset domains more practical. The trade-off is that a hostile exit or observer at the exit side may be able to associate those streams as belonging to the same Tor isolation group.
+- **`hostname` (stricter / slower):** each canonical hostname receives a distinct credential. This separates hostnames into different Tor isolation groups, but can cause a large website with many CDN and challenge hostnames to build or wait for many circuits. A generic SOCKS proxy cannot infer the browser's top-level first-party site, so hostname isolation is not equivalent to Tor Browser's first-party isolation.
+
+Changing the mode requires disconnecting Project NULL, opening Settings, selecting the desired mode, saving, and reconnecting. Older config files without `stream_isolation` default to `session`.
+
+## Requirements
+
+- macOS on Apple Silicon (`arm64`).
+- Internet access for initial setup and Tor bootstrap.
+- Approximately 5 GB free for a first-time Miniforge installation; an existing environment needs less.
+- No `sudo`, Homebrew compilation, or full Xcode installation required by the setup script.
+
+## Install and run
+
+### 1. Extract the ZIP
+
+Download `project-null-v0.4.9.zip`, then in Terminal:
 
 ```bash
-git clone https://github.com/grendizerh/project-null
-cd project-null
+cd ~/Downloads
+unzip -q project-null-v0.4.9.zip
+cd project-null-v0.4.9
 ```
 
-
-### 2. Run setup once
+### 2. Install dependencies and the verified Tor bundle
 
 ```bash
 bash setup_macos.sh
 ```
 
-The setup script:
+The setup script reuses/installs Miniforge under `~/miniforge3`, creates or updates the `project-null-gui` Python 3.12 + Tk environment, installs hash-pinned Python dependencies, and installs Tor Expert Bundle 16.0 only after checking its pinned archive SHA-256.
 
-1. Checks that the Mac is Apple Silicon and has sufficient free disk space.
-2. Reuses `~/miniforge3` if it is already installed; otherwise it downloads Miniforge into your home directory and verifies the installer checksum.
-3. Creates a Python 3.12 environment containing Tkinter.
-4. Installs `cryptography`, `stem`, and `certifi`.
-5. Downloads the Tor Project macOS ARM64 Expert Bundle 16.0 if it is not already installed, verifies its SHA-256 checksum, and installs it under `~/Applications/ProjectNULL/`.
-6. Applies a local ad-hoc code signature to the checksum-verified Tor executable if macOS does not accept its embedded signature. This is **not** an Apple Developer signature or notarization.
+### 3. Run offline tests
 
-The setup is designed for a first install and can be run again to repair or complete the environment.
+```bash
+./start.command --version
+./start.command --self-test
+```
 
-### 3. Start Project NULL
+This build reports **36 passed, 0 failed, 1 skipped** in the available build environment. The skipped test is live Tor connectivity. Unit tests use local fake SOCKS fixtures and do not prove anonymity or live network operation.
+
+### 4. Run the live Tor integration test
+
+```bash
+./start.command --self-test-live
+```
+
+This starts Tor, waits for a built three-hop general-purpose circuit, connects to `check.torproject.org` through the local SOCKS5 adapter, verifies `IsTor: true`, and shuts Tor down. It is a routing smoke test, not a packet-capture leak audit or security certification.
+
+### 5. Launch the application
 
 ```bash
 ./start.command
 ```
 
-You can also double-click `start.command` in Finder. The launcher selects the dedicated Python environment and the per-user Tor binary automatically. It does not depend on whichever older `tor` executable happens to appear first on `PATH`.
-
-### 4. Connect and browse
-
-1. Click **CONNECT** and wait for the dashboard to report **CONNECTED** and show a three-relay circuit.
-2. Click **OPEN CHROME**. Project NULL opens a separate Chrome profile at `~/Project-NULL-Chrome` and configures it to use the local proxy.
-3. Visit <https://check.torproject.org/> to check whether the browser is using Tor.
-4. To stop routing, close the proxied browser window and click **DISCONNECT**.
-
-The regular Chrome profile is not modified. The separate profile is reused on subsequent launches.
-
-### Proxy address
-
-The default proxy is bound only to loopback:
+Click **CONNECT**, wait for Tor bootstrap and circuit construction, and then click **OPEN CHROME**. The managed temporary Chrome profile uses:
 
 ```text
-HTTP proxy: 127.0.0.1
-Port:       28080
+socks5://127.0.0.1:28080
 ```
 
-If configuring a different browser manually, select an HTTP proxy at `127.0.0.1:28080`. Project NULL currently supports HTTPS `CONNECT` tunnels; it is not a general-purpose forward proxy for arbitrary HTTP, UDP, or other protocols.
+No proxy credentials or browser extension are required. The managed profile has DNS prefetch disabled and QUIC disabled (SOCKS5 here relays TCP, not UDP). Chrome is not Tor Browser.
 
-## Diagnostics and tests
+## Browser protocol and destination policy
 
-Use the Python environment installed by the setup script:
+- Browser-side protocol: SOCKS5, no-auth method, bound only to `127.0.0.1`.
+- SOCKS command: CONNECT only.
+- Address type: hostname/domain only; IP-literal requests are rejected.
+- Destination port: TCP/443 only.
+- Hostnames are passed through SOCKS5 to Tor for proxy-side resolution; the local adapter does not resolve page destination hostnames.
+- Chromium's SOCKS5 implementation performs proxy-side resolution for URL requests. DNS prefetch is also disabled. This does not constitute system-wide DNS control or prove that every Chrome subsystem/OS service is incapable of issuing DNS traffic.
+- Tor-side SOCKS is a private Unix socket with `IsolateSOCKSAuth`; Project NULL sends an ephemeral session credential by default or a derived per-host credential when strict hostname mode is selected.
+- If Tor's private SOCKS socket is unavailable or a Tor stream fails, the adapter returns a SOCKS failure. It never opens a direct destination socket.
+- The SOCKS adapter uses a fixed worker pool sized against the process descriptor budget and a bounded pending queue. The accept loop does not wait for an active worker slot. If the pending queue is full, the new connection is refused; no direct fallback is attempted.
 
-```bash
-# Offline unit/self-tests. Does not connect to Tor.
-./start.command --self-test
-
-# Live integration test. Starts Tor, builds a circuit, checks the exit IP,
-# then shuts down the Tor process and local proxy.
-./start.command --self-test-live
-
-# Local-only dashboard mode. Networking is disabled; no relays are simulated.
-./start.command --local-dev
-```
-
-The live test makes an external request to `check.torproject.org` through the Project NULL proxy. It requires internet access and a working Tor network connection.
-
-## How it works
+## Architecture
 
 ```text
-Dedicated Chrome profile
+Chrome (temporary profile)
         |
-        | HTTP CONNECT to 127.0.0.1:28080
+        | SOCKS5 CONNECT, no proxy credentials
         v
-Project NULL local proxy
+Project NULL loopback adapter (127.0.0.1:28080)
         |
-        | SOCKS5 + per-session isolation credentials
-        | Hostname passed to Tor (remote resolution)
+        | hostname + TCP/443 policy; session or hostname isolation
         v
-Tor client on 127.0.0.1:29050
+Private Tor SOCKS Unix socket (0700 directory, socket 0600)
+        |
+        | Tor SOCKS username/password isolation authentication
+        v
+Tor client: entry guard -> middle relay -> exit relay
         |
         v
-Entry relay -> Middle relay -> Exit relay
-                                      |
-                                      v
-                              Public HTTPS website
+Destination hostname:443
 ```
 
-The Tor ControlPort is bound to `127.0.0.1:29150` and uses cookie authentication. The SOCKS listener is bound to `127.0.0.1:29050`; the HTTP proxy is bound to `127.0.0.1:28080`. All three ports can be changed in **SETTINGS**.
+Tor Control uses a separate private Unix-domain socket with cookie authentication. No Tor SOCKS or Control TCP listener is configured.
 
-Application configuration and Tor state are stored under:
+## Cloudflare, performance and website compatibility
 
-```text
-~/Library/Application Support/Project NULL/
-```
+Session isolation reduces one avoidable source of delay: a different Tor circuit group for every distinct hostname. It cannot make Tor low-latency or guarantee that Cloudflare accepts a Tor exit IP. Cloudflare challenges and rate limits can depend on exit-IP reputation, network latency, browser signals and site policy. Project NULL does not bypass or weaken those challenges.
 
-## What Project NULL does — and does not — protect
+The current profile intentionally permits only hostname TCP/443. Plain HTTP on port 80, custom destination ports, IP-literal targets and UDP/QUIC are not supported. Sites relying on a nonstandard port or UDP-only feature may not work. If a page still loads incompletely, inspect the Project NULL log for policy rejection or Tor stream timeout; do not add a `DIRECT` proxy fallback.
 
-| Area | Current behaviour |
-|---|---|
-| HTTPS traffic from an explicitly proxied app | Forwarded through Tor when the proxy is connected |
-| Destination website's observed IP | Tor exit relay IP |
-| Entry relay | Can observe the client's source IP and the next relay |
-| Middle relay | Observes adjacent relays, not the full client-to-destination path |
-| Exit relay | Connects to the destination and can observe destination metadata; plaintext protocols are not protected from the exit |
-| DNS for hostnames sent in proxied CONNECT requests | Hostname is passed to Tor's SOCKS interface for remote resolution |
-| macOS system DNS | Unchanged; this app does not control system-wide DNS |
-| Other applications | Not routed unless separately configured to use the proxy |
-| UDP, QUIC, arbitrary IP traffic | Not supported by this HTTP CONNECT proxy |
-| VPN kill switch / device-wide tunnel | Not implemented |
-| Browser fingerprinting, cookies, account logins | Not prevented |
+## Security limitations
 
-Project NULL's proxy does not implement a direct destination fallback. That is not the same as an operating-system kill switch, and it does not prove that every behaviour of every browser or macOS service is fail-closed. Do not treat this prototype as a device-wide anonymity solution.
-
-### About the ephemeral identity
-
-The Ed25519 keypair is generated locally for the application session and kept in process memory. Its public-key fingerprint contributes to a local session label; an HMAC-derived value is used as a Tor SOCKS isolation credential. Tor relays do not use this key as a new Internet address or as a replacement for IP routing.
-
-Pressing **NEW IDENTITY** changes the isolation credential used for new proxied streams. It does not guarantee a new exit IP, erase browser cookies, change logged-in account identities, or retroactively move already-open connections to a different circuit.
-
-### Anonymity limitations
-
-Tor is not perfect anonymity. The entry relay can see the client's IP address. The destination sees the exit relay's IP address. A website can still identify a user through logins, cookies, browser fingerprinting, tracking links, or information voluntarily supplied. HTTPS protects content between the browser and destination, but does not hide all traffic metadata from every party.
-
-For higher-risk anonymity use cases, use the Tor Project's supported Tor Browser rather than assuming a general-purpose Chrome profile has equivalent anti-fingerprinting protections.
-
-## Requirements
-
-- macOS on Apple Silicon (the setup script is currently scoped to `arm64`).
-- Internet access for initial setup and Tor operation.
-- Approximately 3 GB of free disk space for the first setup; more is preferable.
-- Python 3.12 with Tkinter (created by `setup_macos.sh`).
-- Tor 0.4.9.15 or newer. The bundled/tested Expert Bundle is 16.0.
-- Python packages: `cryptography`, `stem`, `certifi`.
-
-The Tor Expert Bundle is downloaded from the Tor Project's distribution server. Its SHA-256 is checked against the value recorded for that release before extraction. Miniforge is downloaded from the conda-forge release page with its accompanying checksum file.
-
-## Repository files
-
-```text
-project-null/
-├── project_null.py      # Application, Tor manager, proxy, GUI and self-tests
-├── setup_macos.sh       # One-time per-user setup for macOS Apple Silicon
-├── start.command        # Launcher; selects the Python and Tor installations
-├── requirements.txt     # Python package dependencies
-├── README.md
-└── .gitignore
-```
-
-The core application is kept in one Python source file. The setup and launcher scripts are separate convenience files so first-time installation is less error-prone.
+- The ISP can observe that the Mac connects to Tor; the entry guard sees the source IP.
+- A sufficiently capable observer with visibility at both ends of a low-latency Tor connection may correlate traffic timing and volume.
+- Session isolation allows streams to different websites in the same browser session to share a Tor isolation group. Use `hostname` mode for stricter separation at the cost of circuit churn and performance.
+- Chrome is not Tor Browser and does not reproduce its anti-fingerprinting protections. Use the official Tor Browser for privacy-sensitive browsing.
+- Other Mac applications, OS services, system DNS, UDP, IPv6 flows not sent through this proxy, and traffic outside the managed Chrome profile are not covered by a system-wide tunnel or kill switch.
+- The local SOCKS5 listener is unauthenticated; other local processes can use it while the app is connected.
+- Malware on the Mac, a compromised kernel, website accounts/cookies, physical compromise and global traffic correlation are outside this tool's protection.
+- No independent penetration test, packet-capture leak audit, or live on-device Chrome/Tor load test is claimed by the offline build tests.
 
 ## Troubleshooting
 
-### `Tkinter is unavailable` or `No module named _tkinter`
+- **Chrome shows an unsupported `--host-resolver-rules` warning:** v0.4.8 removes that argument. Quit old Project NULL Chrome windows before launching the new temporary profile.
+- **Chrome says proxy unavailable / `ERR_PROXY_CONNECTION_FAILED`:** check that Project NULL is connected and the loopback SOCKS listener is alive. No credentials are required.
+- **Cloudflare challenge is slow or repeats:** verify Settings uses `session` isolation. A Tor exit may still be rate-limited or challenged; changing mode cannot change Cloudflare's policy.
+- **A destination fails:** the current profile permits only hostname TCP/443 requests. Plain HTTP on port 80, custom ports and IP-literal destinations are intentionally rejected.
+- **Port already in use:** change the SOCKS5 proxy port in Settings, then reconnect.
 
-Run `bash setup_macos.sh` and start the app with `./start.command`. Do not launch it using a different Python interpreter that lacks Tcl/Tk.
+## Verify package contents
 
-### Tor is too old or the wrong Tor executable is selected
-
-Run `bash setup_macos.sh` again. The app prefers the per-user Expert Bundle installed under `~/Applications/ProjectNULL/tor-expert-16.0/`. You can override it explicitly with `PROJECT_NULL_TOR_BINARY=/absolute/path/to/tor`.
-
-### A port is already in use
-
-Disconnect Project NULL and check the configured ports:
+The package includes `SHA256SUMS.txt`. Verify files from the extracted directory with:
 
 ```bash
-lsof -nP -iTCP:29050 -sTCP:LISTEN
-lsof -nP -iTCP:29150 -sTCP:LISTEN
-lsof -nP -iTCP:28080 -sTCP:LISTEN
+shasum -a 256 -c SHA256SUMS.txt
 ```
-
-Do not kill a process until you have identified it. Use **SETTINGS** to select different ports if another application legitimately owns one.
-
-### Chrome cannot load a page
-
-Confirm the dashboard is **CONNECTED**, then use **OPEN CHROME** to open the dedicated profile. Run `./start.command --self-test-live` to test Tor independently of the browser proxy. The event log distinguishes failures in the Tor SOCKS handshake from failures in the local HTTP proxy.
-
-## Security status
-
-This is a research and development prototype, not a security-audited product. It has not undergone an independent audit, formal verification, penetration test, or comprehensive DNS/traffic-leak assessment. Do not rely on it to protect sensitive activity or to bypass a hostile network without separately assessing the risks.
-
-## References
-
-- [Tor Project downloads](https://www.torproject.org/download/)
-- [Tor Expert Bundle distribution](https://dist.torproject.org/torbrowser/16.0/)
-- [Tor Expert Bundle SHA-256 manifest](https://archive.torproject.org/tor-package-archive/torbrowser/16.0/sha256sums-unsigned-build.txt)
-- [Miniforge releases](https://github.com/conda-forge/miniforge/releases)
-- [Stem documentation](https://stem.torproject.org/)
-- [Python cryptography documentation](https://cryptography.io/)

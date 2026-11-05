@@ -1,3 +1,2 @@
-cryptography>=45
-stem>=1.8.2
-certifi>=2025.1.31
+stem==1.8.2 --hash=sha256:83fb19ffd4c9f82207c006051480389f80af221a7e4783000aedec4e384eb582
+certifi==2026.10.23 --hash=sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1
