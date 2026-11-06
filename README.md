@@ -6,7 +6,6 @@ Project NULL starts a dedicated Tor client and exposes a SOCKS5 listener on **12
 
 > **Scope:** Project NULL is a browser-specific Tor proxy, not a system-wide VPN. It does not route every Mac application or every operating-system connection through Tor. It is experimental software, not an anonymity guarantee or a replacement for Tor Browser.
 
-This v0.4.9 release does **not** include PHANTOM, FAST/PRIVATE/MAX profiles, auxiliary cover traffic, or a separate cover relay.
 
 ## Contents
 
