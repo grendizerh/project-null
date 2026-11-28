@@ -50,6 +50,9 @@ unzip -q project-null-v0.4.9.zip
 cd ~/Downloads/project-null-v0.4.9
 ```
 
+!!! WARNING !!!
+MacOS might automatically extract the zip after the zip installation, meaning you must skip the ```unzip -q project-null-v0.4.9.zip1``` command.
+
 If Terminal says it cannot find the ZIP but the folder **`~/Downloads/project-null-v0.4.9`** already exists, the archive may already have been extracted or moved. **Do not run unzip again.** Just enter the existing folder:
 
 ```bash
