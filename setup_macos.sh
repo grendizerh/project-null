@@ -113,7 +113,7 @@ fi
 if (( tor_needs_install )); then
   echo "Installing Tor Expert Bundle ${TOR_EXPERT_VERSION}..."
   tor_archive="tor-expert-bundle-macos-aarch64-${TOR_EXPERT_VERSION}.tar.gz"
-  tor_url="https://dist.torproject.org/torbrowser/${TOR_EXPERT_VERSION}/${tor_archive}"
+  tor_url="https://archive.torproject.org/tor-package-archive/torbrowser/${TOR_EXPERT_VERSION}/${tor_archive}"
   curl -fL --retry 5 --retry-all-errors "$tor_url" -o "${TEMP_DIR}/${tor_archive}"
   actual_tor_sha="$(shasum -a 256 "${TEMP_DIR}/${tor_archive}" | awk '{print $1}')"
   [[ "$actual_tor_sha" == "$TOR_SHA256" ]] || fail "Tor Expert Bundle SHA-256 verification failed; archive was not extracted."
